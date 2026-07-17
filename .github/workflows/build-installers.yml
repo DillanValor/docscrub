@@ -1,0 +1,74 @@
+name: Build installers
+
+# Runs on GitHub's own macOS and Windows machines — produces real
+# installers (DMG + Setup.exe) without you owning build infrastructure.
+#
+# Trigger: push a version tag (git tag v0.5.1 && git push --tags),
+# or run manually from the Actions tab (workflow_dispatch).
+
+on:
+  push:
+    tags: ["v*"]
+  workflow_dispatch:
+
+jobs:
+  macos:
+    name: macOS DMG
+    runs-on: macos-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.12"
+      - name: Build .app and DMG
+        run: |
+          chmod +x build_macos.sh
+          ./build_macos.sh
+      - uses: actions/upload-artifact@v4
+        with:
+          name: DocScrub-macOS
+          path: DocScrub-*.dmg
+
+  windows:
+    name: Windows Setup.exe
+    runs-on: windows-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.12"
+      - name: Install dependencies
+        run: |
+          pip install presidio-analyzer presidio-anonymizer python-docx pypdf flask openpyxl olefile pywebview pyinstaller
+          python -m spacy download en_core_web_sm
+      - name: Build app
+        run: pyinstaller docscrub.spec --noconfirm
+      - name: Compile installer
+        shell: pwsh
+        run: |
+          $iscc = "${env:ProgramFiles(x86)}\Inno Setup 6\ISCC.exe"
+          if (-not (Test-Path $iscc)) { choco install innosetup -y --no-progress
+            $iscc = "${env:ProgramFiles(x86)}\Inno Setup 6\ISCC.exe" }
+          $v = python -c "from docscrub import __version__; print(__version__)"
+          & $iscc /DMyAppVersion=$v docscrub.iss
+      - uses: actions/upload-artifact@v4
+        with:
+          name: DocScrub-Windows
+          path: installer/DocScrub-Setup-*.exe
+
+  release:
+    name: Attach to GitHub Release
+    if: startsWith(github.ref, 'refs/tags/')
+    needs: [macos, windows]
+    runs-on: ubuntu-latest
+    permissions:
+      contents: write
+    steps:
+      - uses: actions/download-artifact@v4
+        with:
+          merge-multiple: true
+      - uses: softprops/action-gh-release@v2
+        with:
+          files: |
+            DocScrub-*.dmg
+            DocScrub-Setup-*.exe

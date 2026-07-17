@@ -1,0 +1,538 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>DocScrub — AI-safe document sanitizer</title>
+<style>
+  :root {
+    --bg: #0f1419;
+    --panel: #171e26;
+    --panel-2: #1e2732;
+    --border: #2b3948;
+    --text: #e6edf3;
+    --muted: #8b9aab;
+    --accent: #4da3ff;
+    --accent-dim: #1f3a5a;
+    --critical: #ff6b6b;
+    --high: #ffa94d;
+    --medium: #ffd43b;
+    --ok: #51cf66;
+    --mono: ui-monospace, SFMono-Regular, Menlo, Consolas, monospace;
+  }
+  * { box-sizing: border-box; margin: 0; padding: 0; }
+  body {
+    background: var(--bg); color: var(--text);
+    font: 15px/1.5 -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, sans-serif;
+    min-height: 100vh; display: flex; flex-direction: column;
+  }
+  header {
+    display: flex; align-items: center; gap: 12px;
+    padding: 16px 28px; border-bottom: 1px solid var(--border);
+    background: var(--panel);
+  }
+  header .logo {
+    width: 34px; height: 34px; border-radius: 8px;
+    background: linear-gradient(135deg, #2563eb, #0ea5e9);
+    display: grid; place-items: center; font-size: 18px;
+  }
+  header h1 { font-size: 18px; font-weight: 650; }
+  header .tag { color: var(--muted); font-size: 13px; margin-left: 2px; }
+  header .local-badge {
+    margin-left: auto; font-size: 12px; color: var(--ok);
+    border: 1px solid #2f5e3a; background: #16241b;
+    padding: 4px 10px; border-radius: 999px; display: flex; gap: 6px; align-items: center;
+  }
+  .dot { width: 7px; height: 7px; border-radius: 50%; background: var(--ok); }
+
+  nav { display: flex; gap: 4px; padding: 14px 28px 0; }
+  nav button {
+    background: none; border: 1px solid transparent; color: var(--muted);
+    padding: 8px 16px; border-radius: 8px 8px 0 0; cursor: pointer; font-size: 14px;
+  }
+  nav button.active {
+    color: var(--text); background: var(--panel);
+    border-color: var(--border); border-bottom-color: var(--panel);
+  }
+  nav button .cnt {
+    background: var(--accent-dim); color: var(--accent); border-radius: 999px;
+    font-size: 11px; padding: 1px 7px; margin-left: 6px; font-weight: 650;
+  }
+  main { flex: 1; padding: 0 28px 40px; max-width: 1060px; width: 100%; margin: 0 auto; }
+  section.tab { display: none; background: var(--panel); border: 1px solid var(--border);
+    border-radius: 0 12px 12px 12px; padding: 26px; }
+  section.tab.active { display: block; }
+
+  /* dropzone */
+  #dropzone {
+    border: 2px dashed var(--border); border-radius: 12px;
+    padding: 44px 24px; text-align: center; cursor: pointer;
+    transition: border-color .15s, background .15s;
+  }
+  #dropzone.drag { border-color: var(--accent); background: var(--accent-dim); }
+  #dropzone .big { font-size: 17px; font-weight: 600; margin-bottom: 6px; }
+  #dropzone .sub { color: var(--muted); font-size: 13px; }
+  #fileinput { display: none; }
+
+  .spinner {
+    display: none; margin: 26px auto 4px; width: 34px; height: 34px;
+    border: 3px solid var(--border); border-top-color: var(--accent);
+    border-radius: 50%; animation: spin .8s linear infinite;
+  }
+  @keyframes spin { to { transform: rotate(360deg); } }
+  #scanmsg { display: none; text-align: center; color: var(--muted); font-size: 13px; }
+
+  /* results */
+  #results { display: none; margin-top: 24px; }
+  .tiles { display: grid; grid-template-columns: repeat(auto-fit, minmax(140px, 1fr)); gap: 12px; }
+  .tile {
+    background: var(--panel-2); border: 1px solid var(--border);
+    border-radius: 10px; padding: 12px 16px;
+  }
+  .tile .num { font-size: 24px; font-weight: 700; font-variant-numeric: tabular-nums; }
+  .tile .lbl { color: var(--muted); font-size: 11.5px; text-transform: uppercase; letter-spacing: .05em; }
+  .tile.critical .num { color: var(--critical); }
+  .tile.high .num { color: var(--high); }
+  .tile.medium .num { color: var(--medium); }
+
+  .downloads { display: flex; flex-wrap: wrap; gap: 10px; margin: 18px 0 4px; }
+  .btn {
+    background: var(--accent); color: #08121f; font-weight: 650; border: none;
+    padding: 10px 18px; border-radius: 8px; cursor: pointer; font-size: 14px;
+    text-decoration: none; display: inline-block;
+  }
+  .btn.secondary { background: var(--panel-2); color: var(--text); border: 1px solid var(--border); }
+  .btn.warn { background: #3a2626; color: var(--critical); border: 1px solid #5e2f2f; }
+  .hint { color: var(--muted); font-size: 12.5px; margin-top: 8px; }
+
+  h2.section { font-size: 14px; text-transform: uppercase; letter-spacing: .06em;
+    color: var(--muted); margin: 24px 0 4px; font-weight: 650; }
+
+  /* legend — built for fast visual scanning */
+  .legend { margin-top: 8px; border: 1px solid var(--border); border-radius: 10px; overflow: hidden; }
+  .legend-row {
+    display: grid; grid-template-columns: 230px 1fr 90px; align-items: center;
+    padding: 7px 14px; font-size: 13.5px;
+  }
+  .legend-row:nth-child(even) { background: var(--panel-2); }
+  .legend-row .tok {
+    font-family: var(--mono); font-size: 12.5px; font-weight: 600;
+    border-left: 3px solid var(--border); padding-left: 10px;
+  }
+  .legend-row.critical .tok { border-left-color: var(--critical); }
+  .legend-row.high .tok { border-left-color: var(--high); }
+  .legend-row.medium .tok { border-left-color: var(--medium); }
+  .legend-row .meaning { color: var(--text); }
+  .legend-row .meaning .preview { color: var(--muted); font-family: var(--mono); font-size: 11.5px; margin-left: 8px; }
+  .legend-row .occ { color: var(--muted); font-size: 12px; text-align: right; }
+
+  table { width: 100%; border-collapse: collapse; margin-top: 14px; font-size: 13.5px; }
+  th, td { text-align: left; padding: 9px 12px; border-bottom: 1px solid var(--border); }
+  th { color: var(--muted); font-weight: 600; font-size: 12px; text-transform: uppercase; letter-spacing: .05em; }
+  td.mono, .mono { font-family: var(--mono); font-size: 12.5px; }
+  .sev {
+    display: inline-block; padding: 2px 9px; border-radius: 999px;
+    font-size: 11.5px; font-weight: 650; text-transform: uppercase; letter-spacing: .03em;
+  }
+  .sev.critical { background: #3a2020; color: var(--critical); }
+  .sev.high { background: #3a2d1a; color: var(--high); }
+  .sev.medium { background: #38321a; color: var(--medium); }
+
+  .empty { color: var(--muted); text-align: center; padding: 40px 0; font-size: 14px; }
+
+  textarea {
+    width: 100%; min-height: 170px; background: var(--panel-2); color: var(--text);
+    border: 1px solid var(--border); border-radius: 10px; padding: 14px;
+    font-family: var(--mono); font-size: 13px; resize: vertical;
+  }
+  .rehydrate-grid { display: grid; gap: 14px; }
+  #rehydrated-out { white-space: pre-wrap; background: var(--panel-2);
+    border: 1px solid var(--border); border-radius: 10px; padding: 14px;
+    font-family: var(--mono); font-size: 13px; display: none; }
+
+  .error {
+    display: none; margin-top: 16px; padding: 12px 16px; border-radius: 8px;
+    background: #3a2020; border: 1px solid #5e2f2f; color: var(--critical); font-size: 14px;
+  }
+
+  .warnbox {
+    display: none; margin-top: 4px; padding: 12px 16px; border-radius: 8px;
+    background: #3a2d1a; border: 1px solid #5e4a2f; color: var(--high); font-size: 13.5px;
+  }
+  select {
+    background: var(--panel-2); color: var(--text); border: 1px solid var(--border);
+    border-radius: 8px; padding: 7px 10px; font-size: 13.5px; max-width: 420px;
+  }
+
+  .mode-toggle { display: inline-flex; gap: 0; margin-bottom: 18px;
+    border: 1px solid var(--border); border-radius: 9px; overflow: hidden; }
+  .mode-toggle button {
+    background: var(--panel-2); color: var(--muted); border: none;
+    padding: 9px 20px; cursor: pointer; font-size: 14px;
+  }
+  .mode-toggle button.active { background: var(--accent-dim); color: var(--accent); font-weight: 650; }
+
+  .textout {
+    white-space: pre-wrap; background: var(--panel-2); border: 1px solid var(--border);
+    border-radius: 10px; padding: 14px; font-family: var(--mono); font-size: 13px;
+    max-height: 320px; overflow-y: auto; margin-top: 8px;
+  }
+  .copy-btn { padding: 5px 14px; font-size: 12.5px; margin-left: 10px; vertical-align: middle; }
+  footer { text-align: center; color: var(--muted); font-size: 12px; padding: 18px; }
+  footer .mono { font-size: 11.5px; }
+</style>
+</head>
+<body>
+
+<header>
+  <div class="logo">🧼</div>
+  <div>
+    <h1>DocScrub</h1>
+    <div class="tag">Make any document safe to hand to AI</div>
+  </div>
+  <div class="local-badge"><span class="dot"></span> 100% local — nothing leaves this machine</div>
+</header>
+
+<nav>
+  <button id="tab-sanitize-btn" class="active" onclick="showTab('sanitize')">Sanitize</button>
+  <button id="tab-findings-btn" onclick="showTab('findings')">Full findings<span class="cnt" id="findings-count" style="display:none">0</span></button>
+  <button id="tab-rehydrate-btn" onclick="showTab('rehydrate')">Rehydrate AI response</button>
+</nav>
+
+<main>
+  <!-- ============ SANITIZE ============ -->
+  <section id="tab-sanitize" class="tab active">
+    <div class="mode-toggle">
+      <button id="mode-file-btn" class="active" onclick="setMode('file')">📄 Document</button>
+      <button id="mode-text-btn" onclick="setMode('text')">✂️ Paste text</button>
+    </div>
+
+    <div id="mode-file">
+      <div id="dropzone" onclick="document.getElementById('fileinput').click()">
+        <div class="big">Drop a document here, or click to choose</div>
+        <div class="sub" id="supported-types">.csv · .docx · .log · .md · .pdf · .txt</div>
+      </div>
+    </div>
+
+    <div id="mode-text" style="display:none">
+      <textarea id="paste-in" placeholder="Paste anything — a log snippet, an email, a ticket, a config…"></textarea>
+      <div style="margin-top:12px">
+        <button class="btn" onclick="sanitizeText()">Sanitize text</button>
+      </div>
+    </div>
+    <input type="file" id="fileinput">
+    <div class="spinner" id="spinner"></div>
+    <div id="scanmsg">Scanning locally…</div>
+    <div class="error" id="sanitize-error"></div>
+
+    <div id="results">
+      <div id="sanitized-text-panel" style="display:none">
+        <h2 class="section" style="margin-top:22px">Sanitized text
+          <button class="btn copy-btn" id="copy-sanitized" onclick="copyText('sanitized-text-out', this)">Copy</button>
+        </h2>
+        <div id="sanitized-text-out" class="textout"></div>
+      </div>
+
+      <div class="tiles" style="margin-top:22px">
+        <div class="tile"><div class="num" id="r-total">0</div><div class="lbl">Redactions</div></div>
+        <div class="tile"><div class="num" id="r-unique">0</div><div class="lbl">Unique values</div></div>
+        <div class="tile critical"><div class="num" id="r-critical">0</div><div class="lbl">Critical</div></div>
+        <div class="tile high"><div class="num" id="r-high">0</div><div class="lbl">High</div></div>
+        <div class="tile medium"><div class="num" id="r-medium">0</div><div class="lbl">Medium</div></div>
+      </div>
+
+      <div class="downloads">
+        <a class="btn" id="dl-sanitized" onclick="downloadArtifact(event,'sanitized',this)">⬇ Sanitized document</a>
+        <a class="btn secondary" id="dl-legend" onclick="downloadArtifact(event,'legend',this)">⬇ Legend (.csv)</a>
+        <a class="btn warn" id="dl-mapping" onclick="downloadArtifact(event,'mapping',this)">mapping.json (keep private)</a>
+      </div>
+
+      <h2 class="section">Placeholder legend</h2>
+      <div class="hint" style="margin-top:0">What each placeholder in the sanitized document stands for.</div>
+      <div class="legend" id="legend"></div>
+    </div>
+  </section>
+
+  <!-- ============ FINDINGS ============ -->
+  <section id="tab-findings" class="tab">
+    <div class="empty" id="findings-empty">Run a scan on the Sanitize tab first — the full detection detail lands here.</div>
+    <div id="findings-body" style="display:none">
+      <div class="downloads" style="margin-top:0">
+        <a class="btn secondary" id="dl-findings" onclick="downloadArtifact(event,'findings',this)">⬇ Findings (.csv)</a>
+        <a class="btn secondary" id="dl-report" onclick="downloadArtifact(event,'report',this)">⬇ Findings report (.md)</a>
+      </div>
+      <div class="hint">Both exports mask critical values — safe to attach to a ticket or compliance record.</div>
+      <table id="findings-table">
+        <thead><tr><th>Token</th><th>Meaning</th><th>Severity</th><th>Value (masked)</th><th>×</th><th>Layer</th><th>Score</th></tr></thead>
+        <tbody></tbody>
+      </table>
+    </div>
+  </section>
+
+  <!-- ============ REHYDRATE ============ -->
+  <section id="tab-rehydrate" class="tab">
+    <div class="rehydrate-grid">
+      <div>
+        <label style="font-weight:600; display:block; margin-bottom:8px;">Restore using the mapping from
+          <select id="rehydrate-job"></select>
+        </label>
+        <div style="font-weight:600; margin-bottom:8px;">Paste the AI's response (with tokens)</div>
+        <textarea id="rehydrate-in" placeholder="e.g.  Recommendation for <ORG_1>: reboot <HOSTNAME_2> and rotate <SECRET_VALUE_1>…"></textarea>
+      </div>
+      <div>
+        <button class="btn" onclick="doRehydrate()">Restore original values</button>
+        <button class="btn copy-btn" id="copy-rehydrated" style="display:none"
+                onclick="copyText('rehydrated-out', this)">Copy result</button>
+        <span class="hint" id="rehydrate-src"></span>
+      </div>
+      <div class="error" id="rehydrate-error"></div>
+      <div class="warnbox" id="rehydrate-warn"></div>
+      <div id="rehydrated-out"></div>
+    </div>
+  </section>
+</main>
+
+<footer>
+  DocScrub <span id="version"></span> — engine: <span class="mono" id="model-info">detecting…</span>
+</footer>
+
+<script>
+let currentJob = null;
+
+function setMode(m) {
+  document.getElementById('mode-file').style.display = m === 'file' ? 'block' : 'none';
+  document.getElementById('mode-text').style.display = m === 'text' ? 'block' : 'none';
+  document.getElementById('mode-file-btn').classList.toggle('active', m === 'file');
+  document.getElementById('mode-text-btn').classList.toggle('active', m === 'text');
+}
+
+// In the native window, browser-style downloads don't work (WKWebView
+// dead-ends or navigates the app away). Route through the Python bridge,
+// which opens a real save dialog. In a browser, the normal href download
+// proceeds untouched.
+async function downloadArtifact(e, which, btn) {
+  if (!(window.pywebview && window.pywebview.api
+        && window.pywebview.api.save_artifact)) return;  // browser: use href
+  e.preventDefault();
+  if (!currentJob) return;
+  const old = btn.textContent;
+  try {
+    const r = await window.pywebview.api.save_artifact(currentJob, which);
+    if (r && r.ok) {
+      btn.textContent = '✓ Saved';
+    } else if (r && r.error === 'cancelled') {
+      return;
+    } else {
+      btn.textContent = '✗ Failed';
+    }
+  } catch (err) {
+    btn.textContent = '✗ Failed';
+  }
+  setTimeout(() => { btn.textContent = old; }, 1600);
+}
+
+async function copyText(elId, btn) {
+  const text = document.getElementById(elId).textContent;
+  try {
+    await navigator.clipboard.writeText(text);
+  } catch (e) {  // clipboard API can be finicky in embedded webviews
+    const ta = document.createElement('textarea');
+    ta.value = text; document.body.appendChild(ta);
+    ta.select(); document.execCommand('copy'); ta.remove();
+  }
+  const old = btn.textContent;
+  btn.textContent = '✓ Copied';
+  setTimeout(() => { btn.textContent = old; }, 1400);
+}
+
+async function sanitizeText() {
+  const err = document.getElementById('sanitize-error');
+  err.style.display = 'none';
+  document.getElementById('results').style.display = 'none';
+  document.getElementById('spinner').style.display = 'block';
+  document.getElementById('scanmsg').style.display = 'block';
+  try {
+    const r = await fetch('/api/sanitize-text', {
+      method: 'POST', headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ text: document.getElementById('paste-in').value }),
+    });
+    const j = await r.json();
+    document.getElementById('spinner').style.display = 'none';
+    document.getElementById('scanmsg').style.display = 'none';
+    if (!r.ok) { err.textContent = j.error || 'scan failed'; err.style.display = 'block'; return; }
+    render(j);
+  } catch (e) {
+    document.getElementById('spinner').style.display = 'none';
+    document.getElementById('scanmsg').style.display = 'none';
+    err.textContent = 'scan failed: ' + e; err.style.display = 'block';
+  }
+}
+
+function showTab(name) {
+  for (const t of ['sanitize', 'findings', 'rehydrate']) {
+    document.getElementById('tab-' + t).classList.toggle('active', t === name);
+    document.getElementById('tab-' + t + '-btn').classList.toggle('active', t === name);
+  }
+}
+
+async function loadInfo() {
+  try {
+    const r = await fetch('/api/info');
+    const j = await r.json();
+    document.getElementById('version').textContent = 'v' + j.version;
+    document.getElementById('supported-types').textContent = j.supported.join(' · ');
+    document.getElementById('model-info').textContent =
+      (j.model && j.model.name) ? j.model.name + ' (' + j.model.tier + ')' : 'loads on first scan';
+  } catch (e) {}
+}
+loadInfo();
+
+const dz = document.getElementById('dropzone');
+dz.addEventListener('dragover', e => { e.preventDefault(); dz.classList.add('drag'); });
+dz.addEventListener('dragleave', () => dz.classList.remove('drag'));
+dz.addEventListener('drop', e => {
+  e.preventDefault(); dz.classList.remove('drag');
+  if (e.dataTransfer.files.length) sanitize(e.dataTransfer.files[0]);
+});
+document.getElementById('fileinput').addEventListener('change', e => {
+  if (e.target.files.length) sanitize(e.target.files[0]);
+});
+
+async function sanitize(file) {
+  const err = document.getElementById('sanitize-error');
+  err.style.display = 'none';
+  document.getElementById('results').style.display = 'none';
+  document.getElementById('spinner').style.display = 'block';
+  document.getElementById('scanmsg').style.display = 'block';
+
+  const fd = new FormData();
+  fd.append('file', file);
+  try {
+    const r = await fetch('/api/sanitize', { method: 'POST', body: fd });
+    const j = await r.json();
+    document.getElementById('spinner').style.display = 'none';
+    document.getElementById('scanmsg').style.display = 'none';
+    if (!r.ok) { err.textContent = j.error || 'scan failed'; err.style.display = 'block'; return; }
+    render(j);
+  } catch (e) {
+    document.getElementById('spinner').style.display = 'none';
+    document.getElementById('scanmsg').style.display = 'none';
+    err.textContent = 'scan failed: ' + e; err.style.display = 'block';
+  }
+}
+
+function render(j) {
+  currentJob = j.job_id;
+
+  // paste-text mode: show the sanitized text with a copy button
+  const stp = document.getElementById('sanitized-text-panel');
+  if (j.sanitized_text !== undefined) {
+    document.getElementById('sanitized-text-out').textContent = j.sanitized_text;
+    stp.style.display = 'block';
+  } else {
+    stp.style.display = 'none';
+  }
+
+  document.getElementById('r-total').textContent = j.total_redactions;
+  document.getElementById('r-unique').textContent = j.unique_values;
+  for (const s of ['critical', 'high', 'medium'])
+    document.getElementById('r-' + s).textContent = j.severity_counts[s] || 0;
+
+  const dl = which => '/api/download/' + j.job_id + '/' + which;
+  document.getElementById('dl-sanitized').href = dl('sanitized');
+  document.getElementById('dl-legend').href = dl('legend');
+  document.getElementById('dl-mapping').href = dl('mapping');
+  document.getElementById('dl-findings').href = dl('findings');
+  document.getElementById('dl-report').href = dl('report');
+
+  // ---- legend: token → meaning, grouped by type (server pre-sorts) ----
+  const legend = document.getElementById('legend');
+  legend.innerHTML = '';
+  for (const it of j.items) {
+    const row = document.createElement('div');
+    row.className = 'legend-row ' + it.severity;
+    row.innerHTML =
+      '<div class="tok">' + esc(it.token) + '</div>' +
+      '<div class="meaning">' + esc(it.label) +
+        '<span class="preview">' + esc(it.masked_value) + '</span></div>' +
+      '<div class="occ">' + (it.occurrences > 1 ? '×' + it.occurrences : '') + '</div>';
+    legend.appendChild(row);
+  }
+
+  // ---- full findings tab ----
+  const order = { critical: 0, high: 1, medium: 2, low: 3 };
+  const items = [...j.items].sort((a, b) =>
+    (order[a.severity] - order[b.severity]) || a.token.localeCompare(b.token));
+  const tbody = document.querySelector('#findings-table tbody');
+  tbody.innerHTML = '';
+  for (const it of items) {
+    const tr = document.createElement('tr');
+    tr.innerHTML =
+      '<td class="mono">' + esc(it.token) + '</td>' +
+      '<td>' + esc(it.label) + '</td>' +
+      '<td><span class="sev ' + it.severity + '">' + it.severity + '</span></td>' +
+      '<td class="mono">' + esc(it.masked_value) + '</td>' +
+      '<td>' + it.occurrences + '</td>' +
+      '<td>' + esc(it.layer) + '</td>' +
+      '<td>' + it.score.toFixed(2) + '</td>';
+    tbody.appendChild(tr);
+  }
+  document.getElementById('findings-empty').style.display = 'none';
+  document.getElementById('findings-body').style.display = 'block';
+  const cnt = document.getElementById('findings-count');
+  cnt.textContent = j.unique_values;
+  cnt.style.display = 'inline';
+
+  if (j.model && j.model.name)
+    document.getElementById('model-info').textContent = j.model.name + ' (' + j.model.tier + ')';
+  document.getElementById('rehydrate-src').textContent = 'Latest scan: ' + j.input_name;
+  document.getElementById('results').style.display = 'block';
+  refreshJobs();
+}
+
+async function refreshJobs() {
+  try {
+    const r = await fetch('/api/jobs');
+    const jobs = await r.json();
+    const sel = document.getElementById('rehydrate-job');
+    sel.innerHTML = '';
+    for (const j of jobs) {
+      const o = document.createElement('option');
+      o.value = j.job_id;
+      o.textContent = j.input_name + ' (' + j.tokens + ' tokens)';
+      sel.appendChild(o);
+    }
+    if (currentJob) sel.value = currentJob;  // default: latest scan
+  } catch (e) {}
+}
+
+async function doRehydrate() {
+  const err = document.getElementById('rehydrate-error');
+  const warn = document.getElementById('rehydrate-warn');
+  const out = document.getElementById('rehydrated-out');
+  err.style.display = 'none'; warn.style.display = 'none'; out.style.display = 'none';
+  const text = document.getElementById('rehydrate-in').value;
+  const jobId = document.getElementById('rehydrate-job').value || currentJob;
+  const r = await fetch('/api/rehydrate', {
+    method: 'POST', headers: { 'Content-Type': 'application/json' },
+    body: JSON.stringify({ text, job_id: jobId }),
+  });
+  const j = await r.json();
+  if (!r.ok) { err.textContent = j.error; err.style.display = 'block'; return; }
+  if (j.unresolved && j.unresolved.length) {
+    warn.textContent = '⚠ ' + j.unresolved.length + ' of ' + j.tokens_found +
+      ' tokens are not in this mapping and were left as-is: ' +
+      j.unresolved.join(', ') + ' — is this the right source document?';
+    warn.style.display = 'block';
+  }
+  out.textContent = j.text; out.style.display = 'block';
+  document.getElementById('copy-rehydrated').style.display = 'inline-block';
+}
+
+function esc(s) {
+  return String(s).replace(/[&<>"']/g, c =>
+    ({ '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;', "'": '&#39;' }[c]));
+}
+</script>
+</body>
+</html>
