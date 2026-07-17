@@ -1,0 +1,14 @@
+From: <PERSON_1> <<EMAIL_1>>
+To: <PERSON_2> <<EMAIL_2>>
+Subject: VPN creds for <HOSTNAME_1>
+MIME-Version: 1.0
+Content-Type: text/plain; charset="utf-8"
+Content-Transfer-Encoding: 7bit
+
+<PERSON_2>,
+
+Temp VPN password = <CONNECTION_SECRET_1> for <INTERNAL_IP_1>.
+Tenant is <GUID_1>.
+
+<PERSON_1>
+<PHONE_1>
